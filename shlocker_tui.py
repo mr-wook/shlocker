@@ -6,6 +6,7 @@ if True:
     from   functools import partial
     import json
     import os
+    from   logger import logging
     from   pathlib import Path
     import pdb
     import platformdirs
@@ -31,6 +32,7 @@ if __name__ == "__main__":
         def __init__(self):
             self.data_home = platformdirs.user_data_dir("shlocker", "mr.wook@gmail.com")
             self._width = self._get_width()
+            self._logger_setup()
             self._ui = Tui3(prompt="shlocker> ")
             self._set_dispatch()
             self._docker = docker.from_env()
@@ -111,6 +113,14 @@ if __name__ == "__main__":
                 ibuf = ifd.read(8 * 1024)
             return json.loads(ibuf)
 
+        def _logger_setup(self):
+            log_file = "/var/www/shlocker/shlocker.log"
+            os.makedirs(os.path.dirname(log_file), exist_ok=True)
+            logging.basicConfig(filename=log_file, filemode='a',  # append mode
+                                format='%(asctime)s [%(levelname)s] %(message)s',
+                                level=logging.INFO)  # or DEBUG, WARNING, etc.
+            # logging.info("Shlock logger initialized.")
+
         def ls(self, ui, *args):
             self.reload()
             which = [ 'running' ]
@@ -120,11 +130,8 @@ if __name__ == "__main__":
             for state in which:
                 print(state.upper())
                 for c in self._by_state[state]:
-                    labels = [f"{k}:{c.labels[k]}" for k in visible if k in c.labels]
-                    # print(f"{c.name:<16s} {str(c.id)[-12:]} {c.status}  {' '.join(labels)} {c.ports} {c.top}")
-                    ports = self._port_mappings(c)
-                    mounts = self._mount_bind_mappings(c)
-                    print(f"{c.name:<16s} ({str(c.id)[-12:]}) {ports} {mounts}")
+                    view = self._view(c)
+                    print(view)
             return True
 
         def _match(self, id_or_name, containers = None):
@@ -257,6 +264,15 @@ if __name__ == "__main__":
             ui.add("stop", self.stop)
             ui.add("zz", self.quitter)
 
+        def _start__log(self, c):
+            logging.info(f"Starting {c.name}:{c.id}")
+            c.start()
+            return True
+
+        def _stop__log(self, c):
+            logging.info(f"Stopping {c.name}:{c.id}")
+            c.stop()
+
         def start_stop(self, which, *args):
             if args == ( None, ):
                 print(f"{which} needs a container identifier")
@@ -270,20 +286,25 @@ if __name__ == "__main__":
                         print(self._columnize(dir(c)))
                         print(f"Can't {which} a container that in state ({c.status})")
                         return False
-                    print(f'not c.stop({c.id})')
+                    print(f'not c.stop({c.id})') ; return True
+                    self.stop__log(c)
                 case 'start':
                     if self.running_p(c):
                         print(f"Can't {which} a container that in state ({c.status})")
                         return False
-                    print(f'not c.start({c.id})')
+                    print(f'not c.start({c.id})') ; return True
+                    self._start__log(c)
+                    time.sleep(0.5)
+                    print(self._view(c))
                 case 'restart':
                     if not self.running_p(c):
-                        c.start()
+                        self._start__log(c)
                     else:
-                        c.stop()
+                        self._stop__log(c)
                         time.sleep(2)
-                        c.start()
+                        self._start__log(c)
                         time.sleep(2)
+                        print(self._view(c))
             self.load()
             return True
 
@@ -292,6 +313,13 @@ if __name__ == "__main__":
 
         def stop(self, ui, *args):
             return self.start_stop("stop", *args)
+
+        def _view(self, c):
+            labels = [f"{k}:{c.labels[k]}" for k in visible if k in c.labels]
+            # print(f"{c.name:<16s} {str(c.id)[-12:]} {c.status}  {' '.join(labels)} {c.ports} {c.top}")
+            ports = self._port_mappings(c)
+            mounts = self._mount_bind_mappings(c)
+            return f"{c.name:<16s} ({str(c.id)[-12:]}) {ports} {mounts}"
 
     app = App()
     app.run()
